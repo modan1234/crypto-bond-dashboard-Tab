@@ -40,169 +40,83 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-def price_with_trend(symbol, price, currency='$'):
-    if symbol == "XRP":
-        currency = '₩'
-    previous = st.session_state.get(f"prev_{symbol}")
-    st.session_state[f"prev_{symbol}"] = price
-    if previous is None:
-        return f"{currency}{price:,.0f} 🟡■"
-    if price > previous:
-        return f"{currency}{price:,.0f} 🟢▲"
-    elif price < previous:
-        return f"{currency}{price:,.0f} 🔴▼"
-    else:
-        return f"{currency}{price:,.0f} 🟡■"
+st.title("📊 암호화폐 & 미국 국채 & 실거주 부동산 통합 투자 판단 대시보드")
 
-@st.cache_data(ttl=60)
-def get_naver_price(code):
-    try:
-        url = f"https://finance.naver.com/item/main.nhn?code={code}"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        soup = BeautifulSoup(res.text, "html.parser")
-        price_tag = soup.select_one("p.no_today span.blind")
-        return float(price_tag.text.replace(',', '')) if price_tag else None
-    except:
-        return None
+# ---------------- 암호화폐 & 국채 주요 지표 ----------------
 
-@st.cache_data(ttl=60)
-def get_kimpga_history():
-    try:
-        url = "https://kimpga.com/api/chart/"
-        res = requests.get(url)
-        json_data = res.json()
-        data = pd.DataFrame(json_data)
-        data["date"] = pd.to_datetime(data["date"])
-        data["kimp"] = pd.to_numeric(data["kimp"], errors="coerce")
-        data["dominance"] = pd.to_numeric(data["dominance"], errors="coerce")
-        data.dropna(subset=["kimp", "dominance"], inplace=True)
-        data.sort_values("date", inplace=True)
-        recent_data = data.tail(7)
-        return recent_data
-    except:
-        return None
+st.header("📈 실시간 주요 경제지표")
 
-@st.cache_data(ttl=60)
-def get_kimpga_data():
-    try:
-        url = "https://kimpga.com/"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
-        soup = BeautifulSoup(res.text, "html.parser")
-        items = soup.select("div.flex.flex-wrap div.text-xs.text-gray-500")
-        data = {}
-        for item in items:
-            text = item.get_text()
-            if "김치프리미엄" in text:
-                data['kimp'] = item.find_next("div").get_text()
-            if "도미넌스" in text:
-                data['dominance'] = item.find_next("div").get_text()
-        return data
-    except:
-        return {}
+# 가상 데이터 예시 (실제 데이터는 API로 연결 필요)
+data = {
+    "XRP": "₩876",
+    "BTC 도미넌스": "49.1%",
+    "김치프리미엄": "2.3%",
+    "공포탐욕지수": 25,
+    "미국 10Y 국채금리": "4.25%",
+    "S&P 500": "5110.5",
+    "나스닥": "16100",
+    "달러인덱스": "103.7",
+    "WTI 유가": "$82.1",
+    "VIX": "13.2",
+    "USD/KRW": "₩1,340",
+    "JPY/USD": "0.0066"
+}
 
-@st.cache_data(ttl=60)
-def get_fear_greed_index():
-    try:
-        url = "https://api.alternative.me/fng/"
-        res = requests.get(url)
-        data = res.json()
-        return data['data'][0]['value']
-    except:
-        return "N/A"
+cols = st.columns(4)
+metrics = list(data.items())
+for i, (label, value) in enumerate(metrics):
+    with cols[i % 4]:
+        st.metric(label, value)
 
-def evaluate_investment(xrp_price, kimp, dominance, fear_greed):
-    if xrp_price is None or kimp is None or dominance is None or fear_greed is None:
-        return "📌 데이터 부족으로 판단할 수 없습니다."
-    try:
-        kimp = float(kimp.replace('%','').replace('+','').replace('−','-'))
-        dominance = float(dominance.replace('%','').replace('+','').replace('−','-'))
-        fear_greed = int(fear_greed)
+# ---------------- 투자 판단 추천 ----------------
 
-        if kimp < 0 and fear_greed < 30 and dominance > 50:
-            return "✅ **매수 추천**: 저평가 + 시장 공포 + BTC 강세"
-        elif kimp > 2 and fear_greed > 70 and dominance < 48:
-            return "🚨 **매도 추천**: 고평가 + 시장 과열 + BTC 약세"
-        else:
-            return "⏸️ **중립**: 뚜렷한 신호 없음, 관망 권장"
-    except:
-        return "❓ 데이터 처리 오류"
+st.header("🧠 투자 판단 추천 결과")
+st.markdown("""
+- 📌 **암호화폐**: 중립 (시장 방향성 불확실)
+- 📌 **미국 장기국채**: ⏸️ 중립 (특별한 기회 아님)
+""")
 
-def evaluate_bond_investment(interest_rate, usdkrw, dxy):
-    if None in (interest_rate, usdkrw, dxy):
-        return "📌 데이터 부족으로 판단할 수 없습니다."
-    try:
-        if interest_rate < 4.0 and usdkrw < 1350 and dxy < 104:
-            return "✅ **매수 추천**: 금리 안정 + 엔화 강세 환경"
-        elif interest_rate > 4.4 and dxy > 106:
-            return "🚨 **매도 권고**: 고금리 + 강달러 환경"
-        else:
-            return "⏸️ **중립**: 특별한 기회 아님"
-    except:
-        return "❓ 데이터 처리 오류"
+# ---------------- 부동산 CSV 분석 ----------------
 
-# 탭 구성
-tab1, tab2 = st.tabs(["📊 암호화폐 판단", "💵 미국 국채 판단"])
+st.header("🏠 실거주 투자용 부동산 분석 (CSV 기반)")
 
-with tab1:
-    st.subheader("📊 투자 판단 대시보드")
-    kimp_data = get_kimpga_data()
-    xrp_price = get_naver_price("KR7035720002")
-    fg_index = get_fear_greed_index()
+uploaded_file = st.file_uploader("📥 CSV 파일 업로드", type="csv")
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("🇰🇷 김치프리미엄", kimp_data.get("kimp", "N/A"))
-    with col2:
-        st.metric("🔗 BTC 도미넌스", kimp_data.get("dominance", "N/A"))
-    with col3:
-        st.metric("😨 공포·탐욕 지수", fg_index)
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.subheader("📋 데이터 미리보기")
+    st.dataframe(df.head())
 
-    st.markdown("""
-    #### 🧠 투자 판단 추천 결과
-    """)
-    st.success(evaluate_investment(xrp_price, kimp_data.get("kimp"), kimp_data.get("dominance"), fg_index))
+    st.subheader("🔍 필터 조건 설정")
+    max_price = st.slider("총 매매가 상한 (억원)", 1, 10, 5)
+    min_jeonse = st.slider("최소 전세가율 (%)", 50, 100, 80)
 
-    st.markdown("""
-    #### 📈 최근 7일간 김치프리미엄 및 비트코인 도미넌스 추이
-    - 투자 분위기와 심리를 종합적으로 판단하는 데 참고하세요.
-    """)
+    df['총매매가억'] = df['총매매가'] / 10000
+    filtered = df[(df['총매매가억'] <= max_price) & (df['전세가율'] >= min_jeonse)]
 
-    kimpga_history = get_kimpga_history()
-    if kimpga_history is not None and not kimpga_history.empty:
-        fig, ax1 = plt.subplots(figsize=(10, 4))
-        ax1.plot(kimpga_history['date'], kimpga_history['kimp'], color='red', marker='o', label='김치프리미엄 (%)')
-        ax1.set_ylabel('김치프리미엄 (%)', color='red')
-        ax1.tick_params(axis='y', labelcolor='red')
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))
+    st.markdown(f"**✅ 조건에 맞는 매물: {len(filtered)}건**")
 
-        ax2 = ax1.twinx()
-        ax2.plot(kimpga_history['date'], kimpga_history['dominance'], color='blue', marker='o', label='BTC 도미넌스 (%)')
-        ax2.set_ylabel('BTC 도미넌스 (%)', color='blue')
-        ax2.tick_params(axis='y', labelcolor='blue')
+    def 평가점수(row):
+        score = 0
+        if row['매물가'] <= row['시세'] * 0.95:
+            score += 1
+        if row['전세가율'] >= 80:
+            score += 1
+        if row['임대수익률'] >= 5:
+            score += 1
+        if row['총매매가'] <= 50000:
+            score += 1
+        return score
 
-        fig.autofmt_xdate()
-        plt.title("최근 7일간 김치프리미엄 및 비트코인 도미넌스 추이")
-        st.pyplot(fig)
-    else:
-        st.warning("Kimpga 데이터 로딩에 실패했습니다.")
+    filtered['적합도점수'] = filtered.apply(평가점수, axis=1)
+    filtered['적합도등급'] = filtered['적합도점수'].apply(
+        lambda x: '🟢 매우 우수' if x >= 3 else ('🟡 보통' if x == 2 else '🔴 낮음')
+    )
 
-with tab2:
-    st.subheader("💵 미국 장기국채 투자 판단")
-    # 샘플 데이터 (추후 실시간 API로 교체)
-    bond_rate = 4.25
-    usdkrw = 1340
-    dxy = 103.7
+    st.subheader("📈 투자 적합도 평가")
+    st.dataframe(filtered[['단지명', '매물가', '시세', '전세가율', '임대수익률', '적합도등급']])
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("🇺🇸 美 10년 금리", f"{bond_rate:.2f}%")
-    with col2:
-        st.metric("💱 원/달러 환율", f"₩{usdkrw:,.0f}")
-    with col3:
-        st.metric("📊 달러인덱스(DXY)", f"{dxy:.1f}")
-
-    st.markdown("""
-    #### 🧠 투자 판단 추천 결과
-    """)
-    st.success(evaluate_bond_investment(bond_rate, usdkrw, dxy))
+    st.info("추후 상세 항목별 분석(공원, 학군 등)도 지원될 예정입니다.")
+else:
+    st.markdown("👉 CSV 파일을 업로드하면 분석이 시작됩니다. 예시 컬럼: 단지명, 매물가, 시세, 전세가율, 임대수익률, 총매매가")
 
