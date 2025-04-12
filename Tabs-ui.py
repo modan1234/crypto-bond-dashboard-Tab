@@ -118,7 +118,29 @@ with tabs[1]:
     uploaded_file = st.file_uploader("### 📥 CSV 파일 업로드", type="csv")
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
-        analyze_realestate_data(df)
+        
+        # CSV 파일 열 확인
+        st.write(df.columns)
+
+        # 총매매가 열 확인 후 처리
+        if '총매매가' in df.columns:
+            df['총매매가억'] = df['총매매가'] / 10000
+        else:
+            st.error("데이터에 '총매매가' 열이 없습니다.")
+        
+        # 필터 조건 설정
+        col1, col2 = st.columns(2)
+        with col1:
+            max_price = st.slider("총 매매가 상한 (억원)", 1, 10, 5)
+        with col2:
+            min_jeonse_rate = st.slider("최소 전세가율 (%)", 50, 100, 80)
+
+        # 필터링된 데이터
+        filtered_df = df[(df['총매매가억'] <= max_price) & (df['전세가율'] >= min_jeonse_rate)]
+        st.write(f"📝 필터링된 {len(filtered_df)}개의 매물")
+        st.write(filtered_df)
+
+        analyze_realestate_data(filtered_df)
 
     st.divider()
     st.markdown("### 📥 부산 매물 최신 데이터 수집하기")
@@ -144,19 +166,4 @@ with tabs[1]:
                 latest_path = os.path.join(folder_path, latest_file)
                 df = pd.read_csv(latest_path)
                 st.success(f"✅ 가장 최근 파일 불러오기 완료: `{latest_file}`")
-                analyze_realestate_data(df)
-        except Exception as e:
-            st.error("❌ 최근 파일 불러오기 중 오류가 발생했습니다.")
-            st.exception(e)
-
-    st.markdown("""
-    ---
-    #### ✅ 분석 기능 안내
-    - 공급면적 35평 이하만 분석에 포함됩니다.
-    - 전세가율, 임대수익률 기반 투자 판단 자동 표시
-    - 단지별 평형별 전세/월세 최고/최저가 비교 분석
-    - 실거래가 최저 기준 급매 여부 강조 표시
-    - 최근 5년 실거래 그래프 포함
-    - 실거주자 후기, 학군, 편의시설, 병원 등 종합 평가 추가 예정
-    """)
-
+                analyze_real
