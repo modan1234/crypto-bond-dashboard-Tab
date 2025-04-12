@@ -1,23 +1,21 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from modules.collect_naver_realestate import crawl_naver_busan_apartments
 from modules.investment_analysis import analyze_realestate_data, ai_judgement_crypto_bond, render_mini_charts
 import requests
 
-# 🔐 API Key 환경 변수에서 로딩
+# 🔐 API Key 환경 변수에서 로딩 (보안 처리: 필수 환경 변수 없을 경우 예외 발생)
 TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY")
 CRYPTOCOMPARE_API_KEY = os.getenv("CRYPTOCOMPARE_API_KEY")
 
+if not TWELVEDATA_API_KEY or not CRYPTOCOMPARE_API_KEY:
+    st.stop()
+    raise EnvironmentError("API 키가 설정되지 않았습니다. 환경 변수 TWELVEDATA_API_KEY, CRYPTOCOMPARE_API_KEY를 확인하세요.")
+
 # ✅ 실시간 지표 수집 함수 (정확한 실시간 API 기반)
 def get_live_market_data():
-    if not TWELVEDATA_API_KEY:
-        st.error("🔑 TWELVEDATA_API_KEY가 설정되지 않았습니다. .env 파일 또는 환경변수를 확인해주세요.")
-    if not CRYPTOCOMPARE_API_KEY:
-        st.error("🔑 CRYPTOCOMPARE_API_KEY가 설정되지 않았습니다.")
-        return []
-
     symbols = {
         "VIX": {"symbol": "VIX", "source": "twelve"},
         "WTI유가": {"symbol": "CL=F", "source": "twelve"},
@@ -37,14 +35,16 @@ def get_live_market_data():
             if config["source"] == "twelve":
                 url = f"https://api.twelvedata.com/time_series?symbol={config['symbol']}&interval=1min&outputsize=2&apikey={TWELVEDATA_API_KEY}"
                 res = requests.get(url)
+                res.raise_for_status()
                 json_data = res.json()
                 latest = float(json_data['values'][0]['close'])
                 prev = float(json_data['values'][1]['close'])
             else:  # crypto from cryptocompare
                 url = f"https://min-api.cryptocompare.com/data/price?fsym={config['symbol']}&tsyms=USD&api_key={CRYPTOCOMPARE_API_KEY}"
                 res = requests.get(url)
+                res.raise_for_status()
                 latest = float(res.json()['USD'])
-                prev = latest * 0.98  # 가정
+                prev = latest * 0.98  # 가정 (변화율 시각화를 위한 더미)
 
             change = round(latest - prev, 2)
             change_pct = round((change / prev) * 100, 2)
@@ -56,8 +56,7 @@ def get_live_market_data():
             results.append((name, f"{latest:,.2f}", delta, summary, color, name, latest, prev, change))
         except Exception as e:
             results.append((name, "N/A", "-", "데이터 오류", "⚠️", name, 0, 0, 0))
-    
-    return results if results else []
+    return results
 
 st.set_page_config(page_title="📊 통합 자산 투자 판단 대시보드", layout="wide")
 st.title("📊 통합 자산 투자 판단 대시보드")
@@ -72,24 +71,19 @@ with tabs[0]:
 
     try:
         live_data = get_live_market_data()
-        if not live_data:
-            st.warning("⚠️ 실시간 시장 데이터를 불러오지 못했습니다. API 연결이나 키를 확인해주세요.")
-        else:
-            rows = [live_data[i:i+3] for i in range(0, len(live_data), 3)]
-            for row in rows:
-                cols = st.columns(len(row))
-                for col, (label, value, change_str, summary, color, chart_key, value_raw, prev_value, change) in zip(cols, row):
-                    with col:
-                        with st.container(border=True):
-                            st.markdown(f"<div style='font-size: 20px; font-weight: bold;'>{label}</div>", unsafe_allow_html=True)
-                            st.metric(label="", value=value, delta=change_str)
+        rows = [live_data[i:i+3] for i in range(0, len(live_data), 3)]
+        for row in rows:
+            cols = st.columns(len(row))
+            for col, (label, value, change_str, summary, color, chart_key, value_raw, prev_value, change) in zip(cols, row):
+                with col:
+                    with st.container(border=True):
+                        st.markdown(f"<div style='font-size: 20px; font-weight: bold;'>{label}</div>", unsafe_allow_html=True)
+                        st.metric(label="", value=value, delta=change_str)
 
-                            # 미니 차트 시각화 개선
-                            st.line_chart(pd.DataFrame([prev_value, value_raw], columns=["price"]))
-                            render_mini_charts(st, chart_key, value_raw, prev_value, change, change_str)
+                        render_mini_charts(st, chart_key, value_raw, prev_value, change, change_str)
 
-                            st.markdown(f"<div style='font-size: 14px; color: gray;'>{summary}</div>", unsafe_allow_html=True)
-                            st.markdown(f"<div style='font-size: 18px;'>{color}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size: 14px; color: gray;'>{summary}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div style='font-size: 18px;'>{color}</div>", unsafe_allow_html=True)
     except Exception as e:
         st.error("⚠️ 실시간 데이터 로딩에 실패했습니다. API 연결을 확인해주세요.")
         st.exception(e)
@@ -121,18 +115,7 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("🏠 실거주 투자용 부동산 분석 (CSV 기반)")
 
-    st.markdown("""
-    ### 📥 CSV 파일 업로드
-    👉 CSV 파일을 업로드하면 분석이 시작됩니다. 예시 컬럼: 단지명, 공급면적, 전용면적, 전세가, 월세가, 전세가율, 임대수익률, 총매매가 등
-    ※ 중복 매물은 자동 제거되며, 공급면적 35평 이하만 분석에 포함됩니다.
-    ※ 전용면적/공급면적 구분 표시됩니다.
-    ※ 단지별 평형별 최고/최저 전세가, 월세가 분석 포함됩니다.
-    ※ 급매 여부도 실거래 최저가 기준 자동 판단됩니다.
-    ※ 최근 5년 실거래 변동사항을 작고 간결한 그래프로 표시합니다.
-    ※ 투자 판단은 데이터 기반으로 AI가 자동 권유합니다.
-    """)
-    uploaded_file = st.file_uploader("", type="csv")
-
+    uploaded_file = st.file_uploader("### 📥 CSV 파일 업로드", type="csv")
     if uploaded_file is not None:
         df = pd.read_csv(uploaded_file)
         analyze_realestate_data(df)
@@ -166,4 +149,14 @@ with tabs[1]:
             st.error("❌ 최근 파일 불러오기 중 오류가 발생했습니다.")
             st.exception(e)
 
+    st.markdown("""
+    ---
+    #### ✅ 분석 기능 안내
+    - 공급면적 35평 이하만 분석에 포함됩니다.
+    - 전세가율, 임대수익률 기반 투자 판단 자동 표시
+    - 단지별 평형별 전세/월세 최고/최저가 비교 분석
+    - 실거래가 최저 기준 급매 여부 강조 표시
+    - 최근 5년 실거래 그래프 포함
+    - 실거주자 후기, 학군, 편의시설, 병원 등 종합 평가 추가 예정
+    """)
 
